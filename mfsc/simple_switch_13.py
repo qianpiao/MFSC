@@ -98,8 +98,8 @@ class SimpleSwitch13(app_manager.RyuApp):
                 break
         if tcp_dst == 0:
             pass
-        elif tcp_dst not in range(0,10000):
-            idle_timeout = 5
+        # elif tcp_dst not in range(0,10000):
+        #     idle_timeout = 5
 
         if buffer_id:
             mod = parser.OFPFlowMod(datapath=datapath,cookie=cookie, buffer_id=buffer_id,idle_timeout=idle_timeout,
