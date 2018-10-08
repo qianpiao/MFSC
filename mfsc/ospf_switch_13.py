@@ -283,7 +283,7 @@ class OSPFswitch_13(topo_switch_13.TopoSwitch_13):
 
             # target_match = parser.OFPMatch(in_port=target_in_port, eth_dst=dst)
             if tcp_dst != 0:
-                # if tcp_dst >= 0 and tcp_dst < 10000:
+                # if tcp_dst >= 0 and tcp_dst < 5000:
                 if tcp_dst >= 0:
                     item = {'eth_src':src,'eth_dst':dst,'tcp_dst':tcp_dst}
 

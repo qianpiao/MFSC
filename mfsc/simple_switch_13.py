@@ -88,7 +88,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
                                              actions)]
 
-        # 对tcp_dst不在0到9999之间的包定时10s(只对目的端口号为0到9999进行收集)
+        # 对tcp_dst不在0到5000之间的包定时10s(只对目的端口号为0到9999进行收集)
         idle_timeout = 0
         tcp_dst = 0
         oxm_fields = match.to_jsondict()['OFPMatch']['oxm_fields']
@@ -98,7 +98,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                 break
         if tcp_dst == 0:
             pass
-        # elif tcp_dst not in range(0,10000):
+        # elif tcp_dst not in range(0,5000):
         #     idle_timeout = 5
 
         if buffer_id:

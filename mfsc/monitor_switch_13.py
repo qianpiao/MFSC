@@ -93,6 +93,7 @@ from pulp import *
 
 import time
 import copy
+import random
 
 ARP = arp.arp.__name__
 ETHERNET = ethernet.ethernet.__name__
@@ -109,10 +110,8 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
         self.flow_count = []
         self.flow_count_data = []
 
-        self.flow_covered = []
-        self.flow_covered_wildcard = []
-
         self.flow_set_dst_wildcard = {}
+        self.flow_set_wildcard = {}
 
         self.delay_total = {}
 
@@ -163,10 +162,8 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
                 self.threshold = item
                 self.flow_count=[]
                 self.flow_count_data=[]
-                self.flow_covered = []
-                self.flow_covered_wildcard = []
                 self.per_flow()
-                hub.sleep(2)
+                hub.sleep(1)
                 print("self.threshold = ",self.threshold)
                 print ("the number of flows(per_flow):",len(self.flow_count))
                 print ("self.delay_total is:",self.delay_total)
@@ -174,17 +171,31 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
             '''
             wildcard_based流统计收集方案
             '''
+            for item in self.threshold_list:
+                for switch in list(self.datapaths.keys()):
+                    self.delay_total[switch] = 0
+                self.threshold = item
+                self.flow_count=[]
+                self.flow_count_data=[]
+                self.random_wildcard_based()
+                hub.sleep(1)
+                print("self.threshold = ",self.threshold)
+                print ("the number of flows(wildcard_based):",len(self.flow_count),len(self.flow_covered_wildcard))
+                print ("self.delay_total is:",self.delay_total)
+
+            '''
+            D-FSC流统计收集方案
+            '''
             # for item in self.threshold_list:
             #     for switch in list(self.datapaths.keys()):
             #         self.delay_total[switch] = 0
             #     self.threshold = item
             #     self.flow_count=[]
             #     self.flow_count_data=[]
-            #     self.flow_covered_wildcard = []
-            #     self.random_wildcard_based()
-            #     hub.sleep(2)
+            #     self.D_FSC()
+            #     hub.sleep(1)
             #     print("self.threshold = ",self.threshold)
-            #     print ("使用wildcard_based方案共统计流条数:",len(self.flow_count),len(self.flow_covered_wildcard))
+            #     print ("the number of flows(D-FSC):",len(self.flow_count),len(self.flow_covered_wildcard))
             #     print ("self.delay_total is:",self.delay_total)
 
 
@@ -392,10 +403,6 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
         list_switch = list(self.datapaths.keys())
 
         for item in flow_set_all:
-            # 此流已统计则不再在其他交换机统计
-            # if item in self.flow_covered:
-            #     flow_set_all.remove(item)
-            #     continue
             delay_total_temp = copy.deepcopy(self.delay_total)
             while 1:
                 dpid = min(delay_total_temp.items(), key=lambda x: x[1])[0]
@@ -403,8 +410,7 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
                 if switch in list(self.flow_set.keys()) and item in self.flow_set[switch]:
                     if (self.delay_total[dpid] + 1.4) > self.threshold:
                         break
-                    self.delay_total[dpid] += 1.4
-                    # self.flow_covered.append(item)                           
+                    self.delay_total[dpid] += 1.4                     
                     eth_src = item['eth_src']
                     eth_dst = item['eth_dst']
                     tcp_dst = item['tcp_dst']
@@ -419,6 +425,7 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
 
 
     # flow_set_dst与flow_set_dst_wildcard数据结构：
+
     # flow_set_dst = {'switch1':{'dst1':[{'eth_src':eth_src1,'eth_dst':eth_dst1,'tcp_dst':tcp_dst1},
     #                                    {'eth_src':eth_src2,'eth_dst':eth_dst2,'tcp_dst':tcp_dst2}...],
     #                            'dst2':[...], 'dst3':[...]...}
@@ -431,50 +438,96 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
     #                                     'dst2':{...}, 
     #                                     'dst3':{...}...}
     #                          'switch2':{...},'switch3':{...}...}
+    
+
+    # def flow_wildcard_divide(self,mask):
+    #     self.flow_set_dst_wildcard = {}
+    #     for switch in list(self.flow_set_dst.keys()):
+    #         self.flow_set_dst_wildcard[switch] = {}
+    #         for dst in list(self.flow_set_dst[switch].keys()):
+    #             self.flow_set_dst_wildcard[switch][dst] = {}
+    #             for item in self.flow_set_dst[switch][dst]:
+    #                 tcp_dst = item['tcp_dst']
+    #                 wildcard = tcp_dst & mask
+    #                 self.flow_set_dst_wildcard[switch][dst].setdefault(wildcard, [])
+    #                 if item not in self.flow_set_dst_wildcard[switch][dst][wildcard]:
+    #                     self.flow_set_dst_wildcard[switch][dst][wildcard].append(item)
+
+    # flow_set = {'switch1':[{'eth_src':eth_src1,'eth_dst':eth_dst1,'tcp_dst':tcp_dst1},
+    #                        {'eth_src':eth_src2,'eth_dst':eth_dst2,'tcp_dst':tcp_dst2}...],
+    #             'switch2':[...],'switch3':[...]...}
+    # flow_set_wildcard = {'switch1':{wildcard1:[{'eth_src':eth_src1,'eth_dst':eth_dst1,'tcp_dst':tcp_dst1},
+    #                                            {'eth_src':eth_src2,'eth_dst':eth_dst2,'tcp_dst':tcp_dst2},...],
+    #                                 wildcard2:[...],
+    #                                 wildcard3:[...],...},
+    #                      'switch2':{...},'switch3':{...}...}
+    
 
     def flow_wildcard_divide(self,mask):
-        self.flow_set_dst_wildcard = {}
-        for switch in list(self.flow_set_dst.keys()):
-            self.flow_set_dst_wildcard[switch] = {}
-            for dst in list(self.flow_set_dst[switch].keys()):
-                self.flow_set_dst_wildcard[switch][dst] = {}
-                for item in self.flow_set_dst[switch][dst]:
-                    tcp_dst = item['tcp_dst']
-                    wildcard = tcp_dst & mask
-                    self.flow_set_dst_wildcard[switch][dst].setdefault(wildcard, [])
-                    if item not in self.flow_set_dst_wildcard[switch][dst][wildcard]:
-                        self.flow_set_dst_wildcard[switch][dst][wildcard].append(item)
+        self.flow_set_wildcard = {}
+        for switch in list(self.flow_set.keys()):
+            self.flow_set_wildcard[switch] = {}
+            for item in self.flow_set[switch]:
+                tcp_dst = item['tcp_dst']
+                wildcard = tcp_dst & mask
+                self.flow_set_wildcard[switch].setdefault(wildcard,[])
+                # if item not in self.flow_set_wildcard[switch][wildcard]:
+                self.flow_set_wildcard[switch][wildcard].append(item)
 
     def random_wildcard_based(self):
         mask = 31
         self.flow_wildcard_divide(mask)
-        list_switch = [] + list(self.datapaths.keys())
-        for n in range(len(list_switch)):
-            dpid = list_switch[0]
+        list_switch = list(self.datapaths.keys())
+        flow_set_wildcard_all = copy.deepcopy(self.flow_set_wildcard)
+
+        while len(flow_set_wildcard_all) != 0:
+            # random choose a wildcard
+            switch = random.choice(flow_set_wildcard_all.keys())
+            dpid = int(switch[6:])
+            wildcard = random.choice(flow_set_wildcard_all[switch].keys())
+            del flow_set_wildcard_all[switch][wildcard]
+            if len(flow_set_wildcard_all[switch]) == 0:
+                del flow_set_wildcard_all[switch]
+            delay = 0.19 * len(self.flow_set_wildcard[switch][wildcard]) + 1.21
+            if self.delay_total[dpid] + delay > self.threshold:
+                continue
+            self.delay_total[dpid] += delay
+            tcp_dst = self.flow_set_wildcard[switch][wildcard][0]['tcp_dst']
             _datapath = self._get_datapath(dpid)
             ofp_parser = _datapath.ofproto_parser
-            switch = 'switch' + str(dpid)
-            if switch in list(self.flow_set_dst_wildcard.keys()):
-                for dst in list(self.flow_set_dst_wildcard[switch].keys()):
-                    for wildcard in list(self.flow_set_dst_wildcard[switch][dst].keys()):
-                        delay = 0.091 * len(self.flow_set_dst_wildcard[switch][dst][wildcard]) + 1.214
-                        if self.delay_total[dpid] + delay > self.threshold:
-                            continue
-                        self.delay_total[dpid] += delay
-                        item = (dst,wildcard)
-                        tcp_dst = self.flow_set_dst_wildcard[switch][dst][wildcard][0]['tcp_dst']
-                        match = ofp_parser.OFPMatch(eth_type=0x800,eth_dst=dst,ip_proto=6,tcp_dst=(tcp_dst,mask))
-                        self._send_flow_stats_request(_datapath,match)
-                        self.flow_covered_wildcard.append(item)
-                del self.flow_set_dst_wildcard[switch]
-            list_switch.pop(0)
-            # 删除剩下的交换机中统计过的流
-            for dpid2 in list_switch:
-                switch2 = 'switch' + str(dpid2)
-                for item in self.flow_covered_wildcard:
-                    dst,wildcard = item
-                    if switch2 in list(self.flow_set_dst_wildcard.keys()) and dst in list(self.flow_set_dst_wildcard[switch2].keys()) and wildcard in list(self.flow_set_dst_wildcard[switch2][dst].keys()):
-                        del self.flow_set_dst_wildcard[switch2][dst][wildcard]
+            match = ofp_parser.OFPMatch(eth_type=0x800,ip_proto=6,tcp_dst=(tcp_dst,mask))
+            self._send_flow_stats_request(_datapath,match)
+
+    # def random_wildcard_based(self):
+    #     mask = 31
+    #     self.flow_wildcard_divide(mask)
+    #     list_switch = list(self.datapaths.keys())
+    #     for n in range(len(list_switch)):
+    #         dpid = list_switch[0]
+    #         _datapath = self._get_datapath(dpid)
+    #         ofp_parser = _datapath.ofproto_parser
+    #         switch = 'switch' + str(dpid)
+    #         if switch in list(self.flow_set_dst_wildcard.keys()):
+    #             for dst in list(self.flow_set_dst_wildcard[switch].keys()):
+    #                 for wildcard in list(self.flow_set_dst_wildcard[switch][dst].keys()):
+    #                     delay = 0.19 * len(self.flow_set_dst_wildcard[switch][dst][wildcard]) + 1.21
+    #                     if self.delay_total[dpid] + delay > self.threshold:
+    #                         continue
+    #                     self.delay_total[dpid] += delay
+    #                     item = (dst,wildcard)
+    #                     tcp_dst = self.flow_set_dst_wildcard[switch][dst][wildcard][0]['tcp_dst']
+    #                     match = ofp_parser.OFPMatch(eth_type=0x800,eth_dst=dst,ip_proto=6,tcp_dst=(tcp_dst,mask))
+    #                     self._send_flow_stats_request(_datapath,match)
+    #                     self.flow_covered_wildcard.append(item)
+    #             del self.flow_set_dst_wildcard[switch]
+    #         list_switch.pop(0)
+    #         # 删除剩下的交换机中统计过的流
+    #         for dpid2 in list_switch:
+    #             switch2 = 'switch' + str(dpid2)
+    #             for item in self.flow_covered_wildcard:
+    #                 dst,wildcard = item
+    #                 if switch2 in list(self.flow_set_dst_wildcard.keys()) and dst in list(self.flow_set_dst_wildcard[switch2].keys()) and wildcard in list(self.flow_set_dst_wildcard[switch2][dst].keys()):
+    #                     del self.flow_set_dst_wildcard[switch2][dst][wildcard]
 
 
 
