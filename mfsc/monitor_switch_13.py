@@ -112,6 +112,7 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
 
         self.flow_set_dst_wildcard = {}
         self.flow_set_wildcard = {}
+        self.flow_set_aggregation = {}
 
         self.delay_total = {}
 
@@ -169,7 +170,7 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
                 print ("self.delay_total is:",self.delay_total)
 
             '''
-            wildcard_based流统计收集方案
+            random_wildcard流统计收集方案
             '''
             for item in self.threshold_list:
                 for switch in list(self.datapaths.keys()):
@@ -177,10 +178,10 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
                 self.threshold = item
                 self.flow_count=[]
                 self.flow_count_data=[]
-                self.random_wildcard_based()
+                self.random_wildcard_aggregation()
                 hub.sleep(1)
                 print("self.threshold = ",self.threshold)
-                print ("the number of flows(wildcard_based):",len(self.flow_count),len(self.flow_covered_wildcard))
+                print ("the number of flows(wildcard_based):",len(self.flow_count))
                 print ("self.delay_total is:",self.delay_total)
 
             '''
@@ -195,8 +196,23 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
             #     self.D_FSC()
             #     hub.sleep(1)
             #     print("self.threshold = ",self.threshold)
-            #     print ("the number of flows(D-FSC):",len(self.flow_count),len(self.flow_covered_wildcard))
+            #     print ("the number of flows(D-FSC):",len(self.flow_count))
             #     print ("self.delay_total is:",self.delay_total)
+
+            '''
+            D-FSC流统计收集方案
+            '''
+            for item in self.threshold_list:
+                for switch in list(self.datapaths.keys()):
+                    self.delay_total[switch] = 0
+                self.threshold = item
+                self.flow_count=[]
+                self.flow_count_data=[]
+                self.G_FSC()
+                hub.sleep(1)
+                print("self.threshold = ",self.threshold)
+                print ("the number of flows(G-FSC):",len(self.flow_count))
+                print ("self.delay_total is:",self.delay_total)
 
 
 
@@ -497,11 +513,152 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
             ofp_parser = _datapath.ofproto_parser
             match = ofp_parser.OFPMatch(eth_type=0x800,ip_proto=6,tcp_dst=(tcp_dst,mask))
             self._send_flow_stats_request(_datapath,match)
+    # flow_set_aggregation = {'switch1':{'aggregation1':{wildcard1:[{'eth_src':eth_src1,'eth_dst':eth_dst1,'tcp_dst':tcp_dst1},
+    #                                                       {'eth_src':eth_src2,'eth_dst':eth_dst2,'tcp_dst':tcp_dst2},...],
+    #                                            wildcard2:[...],
+    #                                            wildcard3:[...],...},
+    #                                'aggregation2':{...}, 
+    #                                'aggregation3':{...}...}
+    #                     'switch2':{...},'switch3':{...}...}
 
-    # def random_wildcard_based(self):
+    # only to aggregate wildcards to creat package problem
+    def aggregation_wildcard(self):
+        self.flow_set_aggregation = {}
+        flow_set_wildcard_temp = copy.deepcopy(self.flow_set_wildcard)
+        for switch in list(flow_set_wildcard_temp.keys()):
+            self.flow_set_aggregation[switch] = {}
+            i = 1
+            while len(flow_set_wildcard_temp[switch]) != 0:
+                self.flow_set_aggregation[switch]['aggregation'+str(i)] = {}
+                size = random.randint(1,5)
+                while size > 0 and len(flow_set_wildcard_temp[switch]) != 0:
+                    wildcard = random.choice(flow_set_wildcard_temp[switch].keys())
+                    self.flow_set_aggregation[switch]['aggregation'+str(i)][wildcard] = flow_set_wildcard_temp[switch][wildcard]
+                    del flow_set_wildcard_temp[switch][wildcard]
+                    size -= 1
+                i += 1
+
+    def random_wildcard_aggregation(self):
+        mask = 31
+        self.flow_wildcard_divide(mask)
+        self.aggregation_wildcard()
+
+        list_switch = list(self.datapaths.keys())
+        flow_set_aggregation_all = copy.deepcopy(self.flow_set_aggregation)
+
+        while len(flow_set_aggregation_all) != 0:
+            switch = random.choice(flow_set_aggregation_all.keys())
+            dpid = int(switch[6:])
+            aggregation = random.choice(flow_set_aggregation_all[switch].keys())
+            del flow_set_aggregation_all[switch][aggregation]
+            if len(flow_set_aggregation_all[switch]) == 0:
+                del flow_set_aggregation_all[switch]
+            flow_num = 0
+            for wildcard in self.flow_set_aggregation[switch][aggregation]:
+                flow_num += len(self.flow_set_aggregation[switch][aggregation][wildcard])
+            delay = 0.19 * flow_num + 1.21
+            if self.delay_total[dpid] + delay > self.threshold:
+                continue
+            self.delay_total[dpid] += delay
+            for wildcard in list(self.flow_set_aggregation[switch][aggregation].keys()):
+                tcp_dst = self.flow_set_aggregation[switch][aggregation][wildcard][0]['tcp_dst']
+                _datapath = self._get_datapath(dpid)
+                ofp_parser = _datapath.ofproto_parser
+                match = ofp_parser.OFPMatch(eth_type=0x800,ip_proto=6,tcp_dst=(tcp_dst,mask))
+                self._send_flow_stats_request(_datapath,match)
+
+    # flow_set_aggregation = {'switch1':{'aggregation1':{wildcard1:[{'eth_src':eth_src1,'eth_dst':eth_dst1,'tcp_dst':tcp_dst1},
+    #                                                       {'eth_src':eth_src2,'eth_dst':eth_dst2,'tcp_dst':tcp_dst2},...],
+    #                                            wildcard2:[...],
+    #                                            wildcard3:[...],...},
+    #                                'aggregation2':{...}, 
+    #                                'aggregation3':{...}...}
+    #                     'switch2':{...},'switch3':{...}...}
+
+
+    def greedy_profit(self,flow_set_aggregation_all):
+        delay_total_temp = copy.deepcopy(self.delay_total)
+        switch_profit = {}
+        switch_aggregation_num = {}
+        for switch in list(flow_set_aggregation_all.keys()):
+            switch_aggregation_num[switch] = {}
+            for aggregation in list(flow_set_aggregation_all[switch].keys()):
+                num = 0
+                for wildcard in list(flow_set_aggregation_all[switch][aggregation]):
+                    num += len(flow_set_aggregation_all[switch][aggregation][wildcard])
+                switch_aggregation_num[switch][aggregation] = num
+        for switch in list(switch_aggregation_num.keys()):
+            profit = 0
+            dpid = int(switch[6:])
+            num_sort = sorted(switch_aggregation_num[switch].items(),key = lambda x:x[1],reverse = True)
+            while len(num_sort) != 0:
+                delay = 0.19 * num_sort[0][1] + 1.21
+                if delay + delay_total_temp[dpid] <= self.threshold:
+                    delay_total_temp[dpid] += delay
+                    profit += num_sort[0][1]
+                del(num_sort[0])
+            switch_profit[switch] = profit
+        return max(switch_profit, key=lambda x: switch_profit[x])
+
+
+    def G_FSC(self):
+        mask = 31
+        self.flow_wildcard_divide(mask)
+        self.aggregation_wildcard()
+
+        list_switch = list(self.datapaths.keys())
+        flow_set_aggregation_all = copy.deepcopy(self.flow_set_aggregation)
+
+        while len(flow_set_aggregation_all) != 0:
+            switch = self.greedy_profit(flow_set_aggregation_all)
+            aggregation_num = {}
+            for aggregation in list(flow_set_aggregation_all[switch].keys()):
+                num = 0
+                for wildcard in list(flow_set_aggregation_all[switch][aggregation]):
+                    num += len(flow_set_aggregation_all[switch][aggregation][wildcard])
+                aggregation_num[aggregation] = num
+            dpid = int(switch[6:])
+            num_sort = sorted(aggregation_num.items(),key = lambda x:x[1],reverse = True)
+            while len(num_sort) != 0:
+                delay = 0.19 * num_sort[0][1] + 1.21
+                if delay + self.delay_total[dpid] <= self.threshold:
+                    aggregation = num_sort[0][0]
+                    self.delay_total[dpid] += delay
+                    for wildcard in list(self.flow_set_aggregation[switch][aggregation].keys()):
+                        tcp_dst = self.flow_set_aggregation[switch][aggregation][wildcard][0]['tcp_dst']
+                        _datapath = self._get_datapath(dpid)
+                        ofp_parser = _datapath.ofproto_parser
+                        match = ofp_parser.OFPMatch(eth_type=0x800,ip_proto=6,tcp_dst=(tcp_dst,mask))
+                        self._send_flow_stats_request(_datapath,match)
+                    del flow_set_aggregation_all[switch][aggregation]
+                del(num_sort[0])
+                if len(flow_set_aggregation_all[switch]) == 0:
+                    del flow_set_aggregation_all[switch]
+
+    
+
+    # def G_FSC(self):
     #     mask = 31
     #     self.flow_wildcard_divide(mask)
-    #     list_switch = list(self.datapaths.keys())
+    #     list_switch = []
+    #     num = {}
+    #     for item in list(self.flow_set.keys()):
+    #         dpid = int(item[6])
+    #         num[dpid] = len(self.flow_set[item])
+    #     numlist=list(num.items())
+    #     numcount=[]
+    #     for n in range(len(numlist)):
+    #         numcount.append(numlist[n][1])
+    #     for n in range(len(num)):
+    #         maximum = max(numcount)
+    #         numcount.remove(maximum)
+    #         for dpid in num.keys():
+    #             if maximum == num[dpid]:
+    #                 list_switch.append(dpid)
+    #                 del num[dpid]
+    #                 break
+    #     print("list_switch is:",list_switch)
+
     #     for n in range(len(list_switch)):
     #         dpid = list_switch[0]
     #         _datapath = self._get_datapath(dpid)
@@ -510,7 +667,7 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
     #         if switch in list(self.flow_set_dst_wildcard.keys()):
     #             for dst in list(self.flow_set_dst_wildcard[switch].keys()):
     #                 for wildcard in list(self.flow_set_dst_wildcard[switch][dst].keys()):
-    #                     delay = 0.19 * len(self.flow_set_dst_wildcard[switch][dst][wildcard]) + 1.21
+    #                     delay = 0.091 * len(self.flow_set_dst_wildcard[switch][dst][wildcard]) + 1.214
     #                     if self.delay_total[dpid] + delay > self.threshold:
     #                         continue
     #                     self.delay_total[dpid] += delay
@@ -528,57 +685,6 @@ class MonitorSwitch_13(ospf_switch_13.OSPFswitch_13):
     #                 dst,wildcard = item
     #                 if switch2 in list(self.flow_set_dst_wildcard.keys()) and dst in list(self.flow_set_dst_wildcard[switch2].keys()) and wildcard in list(self.flow_set_dst_wildcard[switch2][dst].keys()):
     #                     del self.flow_set_dst_wildcard[switch2][dst][wildcard]
-
-
-
-    def G_FSC(self):
-        mask = 31
-        self.flow_wildcard_divide(mask)
-        list_switch = []
-        num = {}
-        for item in list(self.flow_set.keys()):
-            dpid = int(item[6])
-            num[dpid] = len(self.flow_set[item])
-        numlist=list(num.items())
-        numcount=[]
-        for n in range(len(numlist)):
-            numcount.append(numlist[n][1])
-        for n in range(len(num)):
-            maximum = max(numcount)
-            numcount.remove(maximum)
-            for dpid in num.keys():
-                if maximum == num[dpid]:
-                    list_switch.append(dpid)
-                    del num[dpid]
-                    break
-        print("list_switch is:",list_switch)
-
-        for n in range(len(list_switch)):
-            dpid = list_switch[0]
-            _datapath = self._get_datapath(dpid)
-            ofp_parser = _datapath.ofproto_parser
-            switch = 'switch' + str(dpid)
-            if switch in list(self.flow_set_dst_wildcard.keys()):
-                for dst in list(self.flow_set_dst_wildcard[switch].keys()):
-                    for wildcard in list(self.flow_set_dst_wildcard[switch][dst].keys()):
-                        delay = 0.091 * len(self.flow_set_dst_wildcard[switch][dst][wildcard]) + 1.214
-                        if self.delay_total[dpid] + delay > self.threshold:
-                            continue
-                        self.delay_total[dpid] += delay
-                        item = (dst,wildcard)
-                        tcp_dst = self.flow_set_dst_wildcard[switch][dst][wildcard][0]['tcp_dst']
-                        match = ofp_parser.OFPMatch(eth_type=0x800,eth_dst=dst,ip_proto=6,tcp_dst=(tcp_dst,mask))
-                        self._send_flow_stats_request(_datapath,match)
-                        self.flow_covered_wildcard.append(item)
-                del self.flow_set_dst_wildcard[switch]
-            list_switch.pop(0)
-            # 删除剩下的交换机中统计过的流
-            for dpid2 in list_switch:
-                switch2 = 'switch' + str(dpid2)
-                for item in self.flow_covered_wildcard:
-                    dst,wildcard = item
-                    if switch2 in list(self.flow_set_dst_wildcard.keys()) and dst in list(self.flow_set_dst_wildcard[switch2].keys()) and wildcard in list(self.flow_set_dst_wildcard[switch2][dst].keys()):
-                        del self.flow_set_dst_wildcard[switch2][dst][wildcard]
 
     def save_data(self,file,data):
 
