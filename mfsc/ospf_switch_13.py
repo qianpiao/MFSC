@@ -117,9 +117,8 @@ class OSPFswitch_13(topo_switch_13.TopoSwitch_13):
         self.flow_set = {}
         self.flow_set_dst = {}
         self.flow_set_next = {}
-        # for dpid in list(self.datapaths.keys()):
-        #     switch = 'switch' + str(dpid)
-        #     self.flow_set[switch] = []
+
+        self.flow_set_all = []
 
         self.sw = {}
 
@@ -290,6 +289,9 @@ class OSPFswitch_13(topo_switch_13.TopoSwitch_13):
                     # switch = target_dpid
 
                     switch = 'switch' + str(target_dpid)
+
+                    if item not in self.flow_set_all:
+                        self.flow_set_all.append(item)
                     # flow_set中没有switch键则加入，设为列表
                     self.flow_set.setdefault(switch, [])
                     if item not in self.flow_set[switch]:
