@@ -4,5 +4,5 @@
 4.Use "pingall" twice.
 5.Use "xterm h1 h2 h3..." to start hosts.
 6.Use iperf to create flows among hosts.
-7.You can the number of covered flows using per-flow,random-wildcard,D-FSC and G-FSC in controller.
+7.You can see the number of covered flows using per-flow,random-wildcard,D-FSC and G-FSC in controller.
 
